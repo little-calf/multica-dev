@@ -72,6 +72,13 @@ export const AttachmentResponseSchema = z.object({
   chat_message_id: z.string().nullable().optional(),
 }).loose();
 
+export const TranscribeAudioResponseSchema = z.object({
+  text: z.string(),
+  language: z.string().optional(),
+  duration_ms: z.number().optional(),
+  attachment_id: z.string(),
+}).loose();
+
 export const EMPTY_ATTACHMENT: Attachment = {
   id: "",
   workspace_id: "",
@@ -87,6 +94,13 @@ export const EMPTY_ATTACHMENT: Attachment = {
   content_type: "",
   size_bytes: 0,
   created_at: "",
+};
+
+export const EMPTY_TRANSCRIBE_AUDIO_RESPONSE = {
+  text: "",
+  language: "",
+  duration_ms: 0,
+  attachment_id: "",
 };
 
 // All object schemas use `.loose()` so unknown server-side fields pass

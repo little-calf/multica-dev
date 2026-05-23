@@ -149,6 +149,14 @@
       "title": "添加子 issue",
       "description": "搜索一个 issue 设为子级"
     },
+    "voice": {
+      "input": "语音输入",
+      "stop_recording": "停止录音",
+      "unsupported_browser": "当前浏览器不支持语音输入。",
+      "permission_required": "语音输入需要麦克风权限。",
+      "no_speech": "未识别到语音，请重试。",
+      "transcribe_failed": "语音转写失败，请重试。"
+    },
     "agent": {
       "created_by": "创建者",
       "select_agent_aria": "选择智能体",

@@ -55,6 +55,10 @@ vi.mock("../../editor", () => ({
     const uploadingRef = useRef(0);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
+      insertMarkdown: (markdown: string) => {
+        valueRef.current = `${valueRef.current}${valueRef.current ? "\n" : ""}${markdown}`;
+        onUpdate?.(valueRef.current);
+      },
       clearContent: () => {
         valueRef.current = "";
       },

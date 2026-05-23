@@ -196,3 +196,17 @@ export interface PaginationParams {
   limit?: number;
   offset?: number;
 }
+
+export interface TranscribeAudioRequest {
+  attachment_id: string;
+  target?: "issue_title" | "issue_description";
+  language?: string;
+  prompt?: string;
+}
+
+export interface TranscribeAudioResponse {
+  text: string;
+  language?: string;
+  duration_ms?: number;
+  attachment_id: string;
+}

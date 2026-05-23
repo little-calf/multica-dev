@@ -33,7 +33,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
@@ -54,6 +54,7 @@ import {
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { PillButton } from "../common/pill-button";
+import { VoiceInputButton } from "../common/voice-input-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 
@@ -101,6 +102,7 @@ export function ManualCreatePanel({
 
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
+  const titleEditorRef = useRef<TitleEditorRef>(null);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
@@ -341,6 +343,18 @@ export function ManualCreatePanel({
     }
   };
 
+  const handleTitleVoiceText = (text: string) => {
+    const next = title.trim() ? `${title.trim()} ${text.trim()}` : text.trim();
+    updateTitle(next);
+    titleEditorRef.current?.setText(next);
+  };
+
+  const handleDescriptionVoiceText = (text: string) => {
+    descEditorRef.current?.insertMarkdown(text.trim());
+    const next = descEditorRef.current?.getMarkdown() ?? "";
+    setDraft({ description: next });
+  };
+
   // Switch to agent mode. Hand the typed text up to the shell as the carry
   // payload; the shell stores it as the next panel's `data` so the agent
   // panel reads `data.prompt` on mount. Concatenate title + description so
@@ -446,7 +460,11 @@ export function ManualCreatePanel({
 
             {/* Title */}
             <div className="px-5 pb-2 shrink-0">
+              <div className="mb-1 flex items-center justify-end">
+                <VoiceInputButton target="issue_title" onText={handleTitleVoiceText} />
+              </div>
               <TitleEditor
+                ref={titleEditorRef}
                 key={formResetKey}
                 autoFocus
                 defaultValue={draft.title}
@@ -664,6 +682,7 @@ export function ManualCreatePanel({
             {/* Footer */}
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
+                <VoiceInputButton target="issue_description" onText={handleDescriptionVoiceText} />
                 <FileUploadButton
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />

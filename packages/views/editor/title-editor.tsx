@@ -27,6 +27,8 @@ interface TitleEditorProps {
 
 interface TitleEditorRef {
   getText: () => string;
+  setText: (value: string) => void;
+  insertText: (value: string) => void;
   focus: () => void;
 }
 
@@ -172,6 +174,34 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
 
     useImperativeHandle(ref, () => ({
       getText: () => editor?.getText() ?? "",
+      setText: (value: string) => {
+        if (!editor) return;
+        editor.commands.setContent(
+          value
+            ? {
+                type: "doc",
+                content: [
+                  { type: "paragraph", content: [{ type: "text", text: value }] },
+                ],
+              }
+            : "",
+          { emitUpdate: true },
+        );
+      },
+      insertText: (value: string) => {
+        if (!editor || !value) return;
+        const current = editor.getText();
+        const next = current ? `${current} ${value}` : value;
+        editor.commands.setContent(
+          {
+            type: "doc",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: next }] },
+            ],
+          },
+          { emitUpdate: true },
+        );
+      },
       focus: () => {
         editor?.commands.focus("end");
       },

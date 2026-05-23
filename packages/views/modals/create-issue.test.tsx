@@ -142,6 +142,10 @@ vi.mock("../editor", () => {
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
+      insertMarkdown: (markdown: string) => {
+        valueRef.current = `${valueRef.current}${valueRef.current ? "\n" : ""}${markdown}`;
+        setValue(valueRef.current);
+      },
       clearContent: () => {
         valueRef.current = "";
         setValue("");
@@ -166,13 +170,31 @@ vi.mock("../editor", () => {
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
     ContentEditor,
-    TitleEditor: ({ defaultValue, placeholder, onChange, onSubmit }: any) => {
+    TitleEditor: forwardRef(function MockTitleEditor(
+      { defaultValue, placeholder, onChange, onSubmit }: any,
+      ref: any,
+    ) {
       const [value, setValue] = useState(defaultValue || "");
+      const valueRef = useRef(defaultValue || "");
+      useImperativeHandle(ref, () => ({
+        getText: () => valueRef.current,
+        setText: (next: string) => {
+          valueRef.current = next;
+          setValue(next);
+        },
+        insertText: (extra: string) => {
+          const next = valueRef.current ? `${valueRef.current} ${extra}` : extra;
+          valueRef.current = next;
+          setValue(next);
+        },
+        focus: () => {},
+      }));
       return (
         <input
           value={value}
           placeholder={placeholder}
           onChange={(e) => {
+            valueRef.current = e.target.value;
             setValue(e.target.value);
             onChange?.(e.target.value);
           }}
@@ -181,7 +203,7 @@ vi.mock("../editor", () => {
           }}
         />
       );
-    },
+    }),
   };
 });
 
