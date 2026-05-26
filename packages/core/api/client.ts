@@ -101,6 +101,8 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  TranscribeAudioRequest,
+  TranscribeAudioResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -152,8 +154,10 @@ import {
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
+  TranscribeAudioResponseSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
+  EMPTY_TRANSCRIBE_AUDIO_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1194,6 +1198,7 @@ export class ApiClient {
     cdn_domain: string;
     allow_signup: boolean;
     google_client_id?: string;
+    stt_enabled: boolean;
     posthog_key?: string;
     posthog_host?: string;
     analytics_environment?: string;
@@ -1386,6 +1391,16 @@ export class ApiClient {
     const raw = (await res.json()) as unknown;
     return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
       endpoint: "POST /api/upload-file",
+    });
+  }
+
+  async transcribeAudio(data: TranscribeAudioRequest): Promise<TranscribeAudioResponse> {
+    const raw = await this.fetch<unknown>("/api/stt/transcribe", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, TranscribeAudioResponseSchema, EMPTY_TRANSCRIBE_AUDIO_RESPONSE, {
+      endpoint: "POST /api/stt/transcribe",
     });
   }
 

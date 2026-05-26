@@ -427,4 +427,43 @@ describe("ApiClient", () => {
       expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
     });
   });
+
+  describe("stt api", () => {
+    it("transcribeAudio posts request body and parses response", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            text: "hello world",
+            language: "en",
+            duration_ms: 1200,
+            attachment_id: "att-1",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const out = await client.transcribeAudio({
+        attachment_id: "att-1",
+        target: "issue_description",
+      });
+
+      expect(out).toEqual({
+        text: "hello world",
+        language: "en",
+        duration_ms: 1200,
+        attachment_id: "att-1",
+      });
+      const [, init] = fetchMock.mock.calls[0]!;
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(init?.body as string)).toEqual({
+        attachment_id: "att-1",
+        target: "issue_description",
+      });
+    });
+  });
 });

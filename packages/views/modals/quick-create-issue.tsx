@@ -27,8 +27,10 @@ import {
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 import type { Agent, Squad } from "@multica/core/types";
+import { useConfigStore } from "@multica/core/config";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
+import { VoiceInputButton } from "../common/voice-input-button";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import {
@@ -134,6 +136,7 @@ export function AgentCreatePanel({
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
+  const sttEnabled = useConfigStore((s) => s.sttEnabled);
 
   // Resolve a candidate actor against the currently-visible agents / squads.
   // Returns null when the candidate doesn't exist in this workspace right
@@ -244,6 +247,8 @@ export function AgentCreatePanel({
   const editorRef = useRef<ContentEditorRef>(null);
   const [hasContent, setHasContent] = useState(initialPrompt.trim().length > 0);
   const [submitting, setSubmitting] = useState(false);
+  const [promptInputActive, setPromptInputActive] = useState(false);
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const [justSent, setJustSent] = useState(false);
   const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -259,6 +264,7 @@ export function AgentCreatePanel({
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
+  const controlsDisabled = promptInputActive || voiceBusy || uploading || submitting;
 
   useEffect(() => {
     // Defer focus so it lands after the dialog's focus trap has settled —
@@ -267,6 +273,18 @@ export function AgentCreatePanel({
     const id = requestAnimationFrame(() => editorRef.current?.focus());
     return () => cancelAnimationFrame(id);
   }, []);
+
+  const handlePromptVoiceText = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    editorRef.current?.insertMarkdown(trimmed);
+    const next = editorRef.current?.getMarkdown() ?? "";
+    setHasContent(next.trim().length > 0);
+    setPrompt(next);
+    setError(null);
+  }, [setPrompt]);
 
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
@@ -413,6 +431,7 @@ export function AgentCreatePanel({
             visibleSquads={visibleSquads}
             selectedAgent={selectedAgent}
             selectedSquad={selectedSquad}
+            disabled={controlsDisabled}
             onPick={(next) => {
               setActor(next);
               setError(null);
@@ -443,18 +462,24 @@ export function AgentCreatePanel({
           {...dropZoneProps}
           className="relative px-5 pb-3 flex flex-1 min-h-[140px] overflow-y-auto"
         >
-          <ContentEditor
-            ref={editorRef}
-            defaultValue={initialPrompt}
-            placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}
-            onUpdate={(md) => {
-              setHasContent(md.trim().length > 0);
-              setPrompt(md);
-            }}
-            onUploadFile={handleUploadFile}
-            onSubmit={submit}
-            debounceMs={150}
-          />
+          <div
+            className="flex flex-1 min-h-0"
+            onFocusCapture={() => setPromptInputActive(true)}
+            onBlurCapture={() => setPromptInputActive(false)}
+          >
+            <ContentEditor
+              ref={editorRef}
+              defaultValue={initialPrompt}
+              placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}
+              onUpdate={(md) => {
+                setHasContent(md.trim().length > 0);
+                setPrompt(md);
+              }}
+              onUploadFile={handleUploadFile}
+              onSubmit={submit}
+              debounceMs={150}
+            />
+          </div>
           {isDragOver && <FileDropOverlay />}
         </div>
 
@@ -472,7 +497,7 @@ export function AgentCreatePanel({
           <ProjectPicker
             projectId={projectId}
             onUpdate={(u) => setProjectId(u.project_id ?? null)}
-            triggerRender={<PillButton />}
+            triggerRender={<PillButton disabled={controlsDisabled} />}
             align="start"
           />
         </div>
@@ -480,9 +505,17 @@ export function AgentCreatePanel({
         {/* Footer */}
         <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-h-7 items-center gap-2">
+            {sttEnabled && (
+              <VoiceInputButton
+                target="quick_create_prompt"
+                onText={handlePromptVoiceText}
+                onBusyChange={setVoiceBusy}
+                disabled={controlsDisabled && !voiceBusy}
+              />
+            )}
             <FileUploadButton
               size="sm"
-              disabled={uploading}
+              disabled={controlsDisabled}
               onSelect={(file) => editorRef.current?.uploadFile(file)}
             />
             {keepOpen && sentCount > 0 && (
@@ -494,6 +527,7 @@ export function AgentCreatePanel({
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
+              disabled={controlsDisabled}
               onClick={switchToManual}
               title={t(($) => $.create_issue.switch_to_manual_tooltip)}
               className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
@@ -505,6 +539,7 @@ export function AgentCreatePanel({
               <Switch
                 size="sm"
                 checked={keepOpen}
+                disabled={controlsDisabled}
                 onCheckedChange={setKeepOpen}
               />
               {t(($) => $.create_issue.create_another)}
@@ -512,7 +547,7 @@ export function AgentCreatePanel({
             <Button
               size="sm"
               onClick={submit}
-              disabled={!hasContent || !actor || submitting || versionBlocked || uploading}
+              disabled={!hasContent || !actor || versionBlocked || controlsDisabled}
               title={
                 versionBlocked
                   ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
@@ -541,6 +576,7 @@ function ActorPicker({
   visibleSquads,
   selectedAgent,
   selectedSquad,
+  disabled = false,
   onPick,
   t,
 }: {
@@ -549,6 +585,7 @@ function ActorPicker({
   visibleSquads: Squad[];
   selectedAgent: Agent | undefined;
   selectedSquad: Squad | undefined;
+  disabled?: boolean;
   onPick: (next: ActorSelection) => void;
   t: ReturnType<typeof useT<"modals">>["t"];
 }) {
@@ -576,6 +613,9 @@ function ActorPicker({
     <PropertyPicker
       open={open}
       onOpenChange={(v: boolean) => {
+        if (disabled && v) {
+          return;
+        }
         setOpen(v);
         if (!v) setFilter("");
       }}
@@ -584,6 +624,7 @@ function ActorPicker({
       searchable
       searchPlaceholder={t(($) => $.create_issue.agent.search_placeholder)}
       onSearchChange={setFilter}
+      triggerRender={<button type="button" disabled={disabled} className="w-full text-left" />}
       trigger={
         <span className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors">
           <span>{t(($) => $.create_issue.agent.created_by)}</span>

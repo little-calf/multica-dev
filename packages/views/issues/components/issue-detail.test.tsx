@@ -136,6 +136,10 @@ vi.mock("../../editor", () => ({
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
+      insertMarkdown: (markdown: string) => {
+        valueRef.current = `${valueRef.current}${valueRef.current ? "\n" : ""}${markdown}`;
+        setValue(valueRef.current);
+      },
       clearContent: () => { valueRef.current = ""; setValue(""); },
       focus: () => {},
       uploadFile: () => {},
@@ -161,6 +165,12 @@ vi.mock("../../editor", () => ({
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
       getText: () => valueRef.current,
+      setText: (next: string) => { valueRef.current = next; setValue(next); },
+      insertText: (extra: string) => {
+        const next = valueRef.current ? `${valueRef.current} ${extra}` : extra;
+        valueRef.current = next;
+        setValue(next);
+      },
       focus: () => {},
     }));
     return (

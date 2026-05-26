@@ -151,6 +151,14 @@
       "title": "Add sub-issue",
       "description": "Search for an issue to add as a sub-issue of the new issue"
     },
+    "voice": {
+      "input": "Voice input",
+      "stop_recording": "Stop recording",
+      "unsupported_browser": "Voice input is not supported in this browser.",
+      "permission_required": "Microphone permission is required for voice input.",
+      "no_speech": "No speech was recognized. Please try again.",
+      "transcribe_failed": "Could not transcribe audio. Please try again."
+    },
     "agent": {
       "created_by": "Created by",
       "select_agent_aria": "Select agent",

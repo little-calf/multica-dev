@@ -290,6 +290,67 @@ func TestUploadFile_AttachesToChatSession(t *testing.T) {
 	})
 }
 
+func TestDeleteAttachment_RemovesRecordAndStorageObject(t *testing.T) {
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = origStorage }()
+
+	attachmentID := uploadTestAudioAttachment(t, "voice.webm", []byte("RIFF....WEBM"))
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, attachmentID)
+	})
+
+	var attachmentURL string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT url FROM attachment WHERE id = $1`,
+		attachmentID,
+	).Scan(&attachmentURL); err != nil {
+		t.Fatalf("query uploaded attachment: %v", err)
+	}
+	key := store.KeyFromURL(attachmentURL)
+
+	store.mu.Lock()
+	_, existsBeforeDelete := store.files[key]
+	store.mu.Unlock()
+	if !existsBeforeDelete {
+		t.Fatalf("expected uploaded object at key %q before deletion", key)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/attachments/"+attachmentID, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", attachmentID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	w := httptest.NewRecorder()
+	testHandler.DeleteAttachment(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteAttachment: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var remainingRows int
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT count(*) FROM attachment WHERE id = $1`,
+		attachmentID,
+	).Scan(&remainingRows); err != nil {
+		t.Fatalf("count attachment rows after delete: %v", err)
+	}
+	if remainingRows != 0 {
+		t.Fatalf("expected attachment row to be deleted, found %d rows", remainingRows)
+	}
+
+	store.mu.Lock()
+	_, existsAfterDelete := store.files[key]
+	store.mu.Unlock()
+	if existsAfterDelete {
+		t.Fatalf("expected storage object at key %q to be deleted", key)
+	}
+}
+
 // TestUploadFile_RejectsForeignChatSession verifies a chat_session in another
 // workspace (or owned by another user) is rejected with 403/404, preventing
 // cross-tenant attachment binding.
@@ -502,4 +563,3 @@ func TestIsTextPreviewable(t *testing.T) {
 		})
 	}
 }
-

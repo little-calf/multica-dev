@@ -10,10 +10,13 @@ import (
 func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	origStorage := testHandler.Storage
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	defer func() {
+		testHandler.Storage = origStorage
+	}()
 
 	t.Setenv("ALLOW_SIGNUP", "false")
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
+	t.Setenv("STT_ENABLED", "false")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
 
@@ -39,6 +42,9 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	if cfg.GoogleClientID != "google-client-id" {
 		t.Fatalf("google_client_id: want google-client-id, got %q", cfg.GoogleClientID)
 	}
+	if cfg.STTEnabled {
+		t.Fatalf("stt_enabled: want false, got true")
+	}
 	if cfg.PosthogKey != "phc_test" {
 		t.Fatalf("posthog_key: want phc_test, got %q", cfg.PosthogKey)
 	}
@@ -47,5 +53,25 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if cfg.AnalyticsEnvironment != "dev" {
 		t.Fatalf("analytics_environment: want dev, got %q", cfg.AnalyticsEnvironment)
+	}
+}
+
+func TestGetConfigReportsSTTEnabledWhenConfigured(t *testing.T) {
+	t.Setenv("STT_ENABLED", "true")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.STTEnabled {
+		t.Fatalf("stt_enabled: want true, got false")
 	}
 }

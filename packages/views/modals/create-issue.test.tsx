@@ -52,6 +52,10 @@ const mockQuickCreateStore = {
   setKeepOpen: mockSetKeepOpen,
 };
 
+const mockConfigStore = {
+  sttEnabled: true,
+};
+
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: mockPush }),
 }));
@@ -85,6 +89,11 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
 vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
   useQuickCreateStore: (selector?: (state: typeof mockQuickCreateStore) => unknown) =>
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
+}));
+
+vi.mock("@multica/core/config", () => ({
+  useConfigStore: (selector?: (state: typeof mockConfigStore) => unknown) =>
+    (selector ? selector(mockConfigStore) : mockConfigStore),
 }));
 
 vi.mock("@multica/core/issues/mutations", () => ({
@@ -142,6 +151,10 @@ vi.mock("../editor", () => {
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
+      insertMarkdown: (markdown: string) => {
+        valueRef.current = `${valueRef.current}${valueRef.current ? "\n" : ""}${markdown}`;
+        setValue(valueRef.current);
+      },
       clearContent: () => {
         valueRef.current = "";
         setValue("");
@@ -166,13 +179,31 @@ vi.mock("../editor", () => {
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
     ContentEditor,
-    TitleEditor: ({ defaultValue, placeholder, onChange, onSubmit }: any) => {
+    TitleEditor: forwardRef(function MockTitleEditor(
+      { defaultValue, placeholder, onChange, onSubmit }: any,
+      ref: any,
+    ) {
       const [value, setValue] = useState(defaultValue || "");
+      const valueRef = useRef(defaultValue || "");
+      useImperativeHandle(ref, () => ({
+        getText: () => valueRef.current,
+        setText: (next: string) => {
+          valueRef.current = next;
+          setValue(next);
+        },
+        insertText: (extra: string) => {
+          const next = valueRef.current ? `${valueRef.current} ${extra}` : extra;
+          valueRef.current = next;
+          setValue(next);
+        },
+        focus: () => {},
+      }));
       return (
         <input
           value={value}
           placeholder={placeholder}
           onChange={(e) => {
+            valueRef.current = e.target.value;
             setValue(e.target.value);
             onChange?.(e.target.value);
           }}
@@ -181,7 +212,7 @@ vi.mock("../editor", () => {
           }}
         />
       );
-    },
+    }),
   };
 });
 
@@ -258,24 +289,67 @@ vi.mock("@multica/ui/components/ui/button", () => ({
 vi.mock("@multica/ui/components/ui/switch", () => ({
   Switch: ({
     checked,
+    disabled,
     onCheckedChange,
   }: {
     checked: boolean;
+    disabled?: boolean;
     onCheckedChange: (v: boolean) => void;
   }) => (
     <input
       aria-label="Create another"
       type="checkbox"
       checked={checked}
+      disabled={disabled}
       onChange={(e) => onCheckedChange(e.target.checked)}
     />
   ),
 }));
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
-  FileUploadButton: ({ onSelect }: { onSelect: (file: File) => void }) => (
-    <button type="button" onClick={() => onSelect(new File(["test"], "test.txt"))}>
+  FileUploadButton: ({
+    disabled,
+    onSelect,
+  }: {
+    disabled?: boolean;
+    onSelect: (file: File) => void;
+  }) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onSelect(new File(["test"], "test.txt"))}
+    >
       Upload file
+    </button>
+  ),
+}));
+
+vi.mock("../common/voice-input-button", () => ({
+  VoiceInputButton: ({
+    target,
+    onText,
+    disabled,
+  }: {
+    target: "issue_title" | "issue_description" | "quick_create_prompt";
+    onText: (text: string) => void;
+    disabled?: boolean;
+  }) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onText(
+        target === "issue_title"
+          ? "Voice title"
+          : target === "quick_create_prompt"
+            ? "Voice prompt"
+            : "Voice description",
+      )}
+    >
+      {target === "issue_title"
+        ? "Voice input title"
+        : target === "quick_create_prompt"
+          ? "Voice input prompt"
+          : "Voice input description"}
     </button>
   ),
 }));
@@ -309,6 +383,7 @@ describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.keepOpen = false;
+    mockConfigStore.sttEnabled = true;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
@@ -411,6 +486,41 @@ describe("CreateIssueModal", () => {
       startDate: null,
       dueDate: null,
     });
+  });
+
+  it("does not bind voice transcription temp attachments when creating an issue", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Voice input title" }));
+    await user.click(screen.getByRole("button", { name: "Voice input description" }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith({
+        title: "Voice title",
+        description: "Voice description",
+        status: "todo",
+        priority: "none",
+        assignee_type: undefined,
+        assignee_id: undefined,
+        start_date: undefined,
+        due_date: undefined,
+        attachment_ids: undefined,
+        parent_issue_id: undefined,
+        project_id: undefined,
+      });
+    });
+  });
+
+  it("hides voice input buttons when STT is not configured", () => {
+    mockConfigStore.sttEnabled = false;
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Voice input title" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Voice input description" })).toBeNull();
   });
 
   // Manual → agent must also forward the picked squad. Without this branch
@@ -610,5 +720,28 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
 
     expect(mockSetDraft).toHaveBeenCalledWith({ title: "", description: "" });
+  });
+
+  it("disables secondary manual actions while the user is typing", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    const titleInput = screen.getByPlaceholderText("Issue title");
+    await user.type(titleInput, "Typing lock");
+
+    expect(screen.getByRole("button", { name: /Switch to Agent/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Upload file" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create Issue" })).toBeDisabled();
+    expect(screen.getByLabelText("Create another")).toBeDisabled();
+
+    fireEvent.blur(titleInput);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Switch to Agent/i })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "Upload file" })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "Create Issue" })).not.toBeDisabled();
+      expect(screen.getByLabelText("Create another")).not.toBeDisabled();
+    });
   });
 });
