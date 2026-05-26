@@ -40,6 +40,10 @@ const mockSquadsData = vi.hoisted(
   () => ({ list: [] as Array<{ id: string; name: string; leader_id: string; archived_at: string | null }> }),
 );
 
+const mockConfigStore = vi.hoisted(() => ({
+  sttEnabled: true,
+}));
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => {
     // Workspace-scoped query keys carry the wsId as `queryKey[1]`; the
@@ -101,6 +105,11 @@ vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: (selector?: (state: { setLastMode: typeof mockSetLastMode }) => unknown) =>
     (selector ? selector({ setLastMode: mockSetLastMode }) : { setLastMode: mockSetLastMode }),
+}));
+
+vi.mock("@multica/core/config", () => ({
+  useConfigStore: (selector?: (state: typeof mockConfigStore) => unknown) =>
+    (selector ? selector(mockConfigStore) : mockConfigStore),
 }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -244,18 +253,47 @@ vi.mock("@multica/ui/components/ui/button", () => ({
 }));
 
 vi.mock("@multica/ui/components/ui/switch", () => ({
-  Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) => (
+  Switch: ({
+    checked,
+    disabled,
+    onCheckedChange,
+  }: {
+    checked: boolean;
+    disabled?: boolean;
+    onCheckedChange: (v: boolean) => void;
+  }) => (
     <input
       aria-label="Create another"
       type="checkbox"
       checked={checked}
+      disabled={disabled}
       onChange={(e) => onCheckedChange(e.target.checked)}
     />
   ),
 }));
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
-  FileUploadButton: () => <button type="button">Upload file</button>,
+  FileUploadButton: ({ disabled }: { disabled?: boolean }) => (
+    <button type="button" disabled={disabled}>Upload file</button>
+  ),
+}));
+
+vi.mock("../common/voice-input-button", () => ({
+  VoiceInputButton: ({
+    disabled,
+    onText,
+  }: {
+    disabled?: boolean;
+    onText: (text: string) => void;
+  }) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onText("Voice prompt")}
+    >
+      Voice input prompt
+    </button>
+  ),
 }));
 
 vi.mock("sonner", () => ({
@@ -282,6 +320,7 @@ function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
 describe("AgentCreatePanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockConfigStore.sttEnabled = true;
     mockQuickCreateStore.lastActorType = null;
     mockQuickCreateStore.lastActorId = null;
     mockQuickCreateStore.lastProjectId = null;
@@ -416,5 +455,53 @@ describe("AgentCreatePanel", () => {
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
     expect(mockSetLastProjectId).not.toHaveBeenCalled();
+  });
+
+  it("appends voice transcription to the existing prompt", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    await user.click(screen.getByRole("button", { name: "Voice input prompt" }));
+
+    expect(
+      screen.getByPlaceholderText(
+        'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      ),
+    ).toHaveValue("Persisted draft prompt\nVoice prompt");
+    expect(mockSetPrompt).toHaveBeenLastCalledWith("Persisted draft prompt\nVoice prompt");
+  });
+
+  it("disables secondary agent actions while the prompt editor is focused", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.click(editor);
+
+    expect(screen.getByRole("button", { name: /Switch to Manual/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Upload file" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Create \(/i })).toBeDisabled();
+    expect(screen.getByLabelText("Create another")).toBeDisabled();
+
+    await user.tab();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Switch to Manual/i })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "Upload file" })).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: /^Create \(/i })).not.toBeDisabled();
+      expect(screen.getByLabelText("Create another")).not.toBeDisabled();
+    });
+  });
+
+  it("hides the agent voice input when STT is not configured", () => {
+    mockConfigStore.sttEnabled = false;
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByRole("button", { name: "Voice input prompt" })).toBeNull();
   });
 });

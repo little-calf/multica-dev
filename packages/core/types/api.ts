@@ -199,7 +199,7 @@ export interface PaginationParams {
 
 export interface TranscribeAudioRequest {
   attachment_id: string;
-  target?: "issue_title" | "issue_description";
+  target?: "issue_title" | "issue_description" | "quick_create_prompt";
   language?: string;
   prompt?: string;
 }

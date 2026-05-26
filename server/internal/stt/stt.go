@@ -54,7 +54,19 @@ type Service struct {
 	Timeout       time.Duration
 }
 
+func FeatureEnabledFromEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("STT_ENABLED"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func NewFromEnv() *Service {
+	if !FeatureEnabledFromEnv() {
+		return nil
+	}
 	maxMB := int64(25)
 	if raw := strings.TrimSpace(os.Getenv("STT_MAX_AUDIO_MB")); raw != "" {
 		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
@@ -108,9 +120,10 @@ func IsSupportedAudioType(contentType, filename string) bool {
 }
 
 type openAIProvider struct {
-	apiKey string
-	model  string
-	client *http.Client
+	apiKey   string
+	model    string
+	endpoint string
+	client   *http.Client
 }
 
 func newProviderFromEnv() Provider {
@@ -128,7 +141,16 @@ func newProviderFromEnv() Provider {
 		if model == "" {
 			model = "whisper-1"
 		}
-		return &openAIProvider{apiKey: key, model: model, client: &http.Client{Timeout: 70 * time.Second}}
+		endpoint := strings.TrimSpace(os.Getenv("OPENAI_STT_ENDPOINT"))
+		if endpoint == "" {
+			endpoint = "https://api.openai.com/v1/audio/transcriptions"
+		}
+		return &openAIProvider{
+			apiKey:   key,
+			model:    model,
+			endpoint: endpoint,
+			client:   &http.Client{Timeout: 70 * time.Second},
+		}
 	default:
 		return nil
 	}
@@ -163,7 +185,7 @@ func (p *openAIProvider) Transcribe(ctx context.Context, audio Audio, opts Trans
 	}
 
 	started := time.Now()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/audio/transcriptions", &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint, &body)
 	if err != nil {
 		return Transcript{}, err
 	}

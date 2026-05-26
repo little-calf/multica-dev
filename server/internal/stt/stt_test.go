@@ -59,3 +59,15 @@ func TestServiceTranscribeValidation(t *testing.T) {
 		t.Fatalf("expected transcript text 'ok', got %q", out.Text)
 	}
 }
+
+func TestFeatureEnabledFromEnv(t *testing.T) {
+	t.Setenv("STT_ENABLED", "")
+	if FeatureEnabledFromEnv() {
+		t.Fatalf("expected STT to be disabled when STT_ENABLED is empty")
+	}
+
+	t.Setenv("STT_ENABLED", "true")
+	if !FeatureEnabledFromEnv() {
+		t.Fatalf("expected STT to be enabled when STT_ENABLED=true")
+	}
+}

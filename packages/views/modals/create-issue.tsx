@@ -45,6 +45,7 @@ import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-st
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useConfigStore } from "@multica/core/config";
 import {
   api,
   ApiError,
@@ -99,6 +100,7 @@ export function ManualCreatePanel({
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const sttEnabled = useConfigStore((s) => s.sttEnabled);
 
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -110,6 +112,10 @@ export function ManualCreatePanel({
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
   const [priority, setPriority] = useState<IssuePriority>(draft.priority);
   const [submitting, setSubmitting] = useState(false);
+  const [titleInputActive, setTitleInputActive] = useState(false);
+  const [descriptionInputActive, setDescriptionInputActive] = useState(false);
+  const [titleVoiceBusy, setTitleVoiceBusy] = useState(false);
+  const [descriptionVoiceBusy, setDescriptionVoiceBusy] = useState(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
     if (data && "assignee_type" in data) {
       return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
@@ -150,7 +156,7 @@ export function ManualCreatePanel({
 
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast, uploading } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
@@ -169,6 +175,19 @@ export function ManualCreatePanel({
   };
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
+
+  const controlsDisabled =
+    titleInputActive ||
+    descriptionInputActive ||
+    titleVoiceBusy ||
+    descriptionVoiceBusy ||
+    uploading ||
+    submitting;
+  const submissionBlocked =
+    titleVoiceBusy ||
+    descriptionVoiceBusy ||
+    uploading ||
+    submitting;
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
@@ -197,7 +216,7 @@ export function ManualCreatePanel({
   };
 
   const handleSubmit = async () => {
-    if (!title.trim() || submitting) return;
+    if (!title.trim() || submissionBlocked) return;
     setSubmitting(true);
     try {
       const issue = await createIssueMutation.mutateAsync({
@@ -460,31 +479,49 @@ export function ManualCreatePanel({
 
             {/* Title */}
             <div className="px-5 pb-2 shrink-0">
-              <div className="mb-1 flex items-center justify-end">
-                <VoiceInputButton target="issue_title" onText={handleTitleVoiceText} />
+              {sttEnabled && (
+                <div className="mb-1 flex items-center justify-end">
+                  <VoiceInputButton
+                    target="issue_title"
+                    onText={handleTitleVoiceText}
+                    onBusyChange={setTitleVoiceBusy}
+                    disabled={controlsDisabled && !titleVoiceBusy}
+                  />
+                </div>
+              )}
+              <div
+                onFocusCapture={() => setTitleInputActive(true)}
+                onBlurCapture={() => setTitleInputActive(false)}
+              >
+                <TitleEditor
+                  ref={titleEditorRef}
+                  key={formResetKey}
+                  autoFocus
+                  defaultValue={draft.title}
+                  placeholder={t(($) => $.create_issue.title_placeholder)}
+                  className="text-lg font-semibold"
+                  onChange={(v) => updateTitle(v)}
+                  onSubmit={handleSubmit}
+                />
               </div>
-              <TitleEditor
-                ref={titleEditorRef}
-                key={formResetKey}
-                autoFocus
-                defaultValue={draft.title}
-                placeholder={t(($) => $.create_issue.title_placeholder)}
-                className="text-lg font-semibold"
-                onChange={(v) => updateTitle(v)}
-                onSubmit={handleSubmit}
-              />
             </div>
 
             {/* Description — takes remaining space */}
             <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
-              <ContentEditor
-                ref={descEditorRef}
-                defaultValue={draft.description}
-                placeholder={t(($) => $.create_issue.description_placeholder)}
-                onUpdate={(md) => setDraft({ description: md })}
-                onUploadFile={handleUpload}
-                debounceMs={500}
-              />
+              <div
+                className="flex flex-1 min-h-0"
+                onFocusCapture={() => setDescriptionInputActive(true)}
+                onBlurCapture={() => setDescriptionInputActive(false)}
+              >
+                <ContentEditor
+                  ref={descEditorRef}
+                  defaultValue={draft.description}
+                  placeholder={t(($) => $.create_issue.description_placeholder)}
+                  onUpdate={(md) => setDraft({ description: md })}
+                  onUploadFile={handleUpload}
+                  debounceMs={500}
+                />
+              </div>
               {descDragOver && <FileDropOverlay />}
             </div>
 
@@ -494,7 +531,7 @@ export function ManualCreatePanel({
               <StatusPicker
                 status={status}
                 onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
-                triggerRender={<PillButton />}
+                triggerRender={<PillButton disabled={controlsDisabled} />}
                 align="start"
               />
 
@@ -502,7 +539,7 @@ export function ManualCreatePanel({
               <PriorityPicker
                 priority={priority}
                 onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
-                triggerRender={<PillButton />}
+                triggerRender={<PillButton disabled={controlsDisabled} />}
                 align="start"
               />
 
@@ -514,7 +551,7 @@ export function ManualCreatePanel({
                   u.assignee_type ?? undefined,
                   u.assignee_id ?? undefined,
                 )}
-                triggerRender={<PillButton />}
+                triggerRender={<PillButton disabled={controlsDisabled} />}
                 align="start"
               />
 
@@ -522,7 +559,7 @@ export function ManualCreatePanel({
               <DueDatePicker
                 dueDate={dueDate}
                 onUpdate={(u) => updateDueDate(u.due_date ?? null)}
-                triggerRender={<PillButton />}
+                triggerRender={<PillButton disabled={controlsDisabled} />}
                 align="start"
               />
 
@@ -530,7 +567,7 @@ export function ManualCreatePanel({
               <ProjectPicker
                 projectId={projectId ?? null}
                 onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
-                triggerRender={<PillButton />}
+                triggerRender={<PillButton disabled={controlsDisabled} />}
                 align="start"
               />
 
@@ -543,7 +580,7 @@ export function ManualCreatePanel({
                 <StartDatePicker
                   startDate={startDate}
                   onUpdate={(u) => updateStartDate(u.start_date ?? null)}
-                  triggerRender={<PillButton />}
+                  triggerRender={<PillButton disabled={controlsDisabled} />}
                   align="start"
                   open={startDatePickerOpen}
                   onOpenChange={setStartDatePickerOpen}
@@ -557,6 +594,7 @@ export function ManualCreatePanel({
                 <div className="inline-flex items-center rounded-full border text-xs transition-colors hover:bg-accent/60">
                   <button
                     type="button"
+                    disabled={controlsDisabled}
                     onClick={() => setParentPickerOpen(true)}
                     className="flex items-center gap-1.5 py-1 pl-2.5 cursor-pointer"
                   >
@@ -567,6 +605,7 @@ export function ManualCreatePanel({
                   </button>
                   <button
                     type="button"
+                    disabled={controlsDisabled}
                     onClick={() => setParentIssueId(undefined)}
                     className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
                     aria-label={t(($) => $.create_issue.remove_parent_aria)}
@@ -589,6 +628,7 @@ export function ManualCreatePanel({
                   </div>
                   <button
                     type="button"
+                    disabled={controlsDisabled}
                     onClick={() =>
                       setChildIssues((prev) => prev.filter((x) => x.id !== c.id))
                     }
@@ -605,7 +645,10 @@ export function ManualCreatePanel({
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <PillButton aria-label={t(($) => $.create_issue.more_options_aria)}>
+                    <PillButton
+                      aria-label={t(($) => $.create_issue.more_options_aria)}
+                      disabled={controlsDisabled}
+                    >
                       <MoreHorizontal className="size-3.5" />
                     </PillButton>
                   }
@@ -682,14 +725,23 @@ export function ManualCreatePanel({
             {/* Footer */}
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
-                <VoiceInputButton target="issue_description" onText={handleDescriptionVoiceText} />
+                {sttEnabled && (
+                  <VoiceInputButton
+                    target="issue_description"
+                    onText={handleDescriptionVoiceText}
+                    onBusyChange={setDescriptionVoiceBusy}
+                    disabled={controlsDisabled && !descriptionVoiceBusy}
+                  />
+                )}
                 <FileUploadButton
+                  disabled={controlsDisabled}
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
+                  disabled={controlsDisabled}
                   onClick={switchToAgent}
                   title={t(($) => $.create_issue.switch_to_agent_tooltip)}
                   className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
@@ -701,6 +753,7 @@ export function ManualCreatePanel({
                   <Switch
                     size="sm"
                     checked={keepOpen}
+                    disabled={controlsDisabled}
                     onCheckedChange={setKeepOpen}
                   />
                   {t(($) => $.create_issue.create_another)}
@@ -713,7 +766,7 @@ export function ManualCreatePanel({
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+                  <Button size="sm" onClick={handleSubmit} disabled={controlsDisabled}>
                     {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
                   </Button>
                 )}

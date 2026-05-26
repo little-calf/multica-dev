@@ -9,12 +9,14 @@ import { VoiceInputButton } from "./voice-input-button";
 
 const mockUploadFile = vi.hoisted(() => vi.fn());
 const mockTranscribeAudio = vi.hoisted(() => vi.fn());
+const mockDeleteAttachment = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", () => ({
   api: {
     uploadFile: (...args: unknown[]) => mockUploadFile(...args),
     transcribeAudio: (...args: unknown[]) => mockTranscribeAudio(...args),
+    deleteAttachment: (...args: unknown[]) => mockDeleteAttachment(...args),
   },
 }));
 
@@ -27,6 +29,16 @@ vi.mock("sonner", () => ({
 const TEST_RESOURCES = {
   en: { common: enCommon, modals: enModals },
 };
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function renderWithI18n(ui: ReactNode) {
   return render(
@@ -69,6 +81,7 @@ describe("VoiceInputButton", () => {
   beforeEach(() => {
     mockUploadFile.mockReset();
     mockTranscribeAudio.mockReset();
+    mockDeleteAttachment.mockReset();
     mockToastError.mockReset();
 
     (globalThis as { MediaRecorder?: unknown }).MediaRecorder = MediaRecorderMock;
@@ -90,10 +103,11 @@ describe("VoiceInputButton", () => {
     }
   });
 
-  it("records, uploads, transcribes, and emits text", async () => {
+  it("records, uploads, transcribes, deletes the temporary attachment, and emits text", async () => {
     const onText = vi.fn();
     mockUploadFile.mockResolvedValue({ id: "att-1" });
     mockTranscribeAudio.mockResolvedValue({ text: "transcribed title" });
+    mockDeleteAttachment.mockResolvedValue(undefined);
 
     renderWithI18n(<VoiceInputButton target="issue_title" onText={onText} />);
 
@@ -108,6 +122,7 @@ describe("VoiceInputButton", () => {
         target: "issue_title",
       });
       expect(onText).toHaveBeenCalledWith("transcribed title");
+      expect(mockDeleteAttachment).toHaveBeenCalledWith("att-1");
     });
   });
 
@@ -124,6 +139,68 @@ describe("VoiceInputButton", () => {
       expect(mockToastError).toHaveBeenCalled();
       expect(mockUploadFile).not.toHaveBeenCalled();
       expect(mockTranscribeAudio).not.toHaveBeenCalled();
+    });
+  });
+
+  it("cancels recording on unmount without uploading or transcribing", async () => {
+    const onText = vi.fn();
+    const view = renderWithI18n(
+      <VoiceInputButton target="issue_description" onText={onText} />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /voice input/i }));
+    view.unmount();
+
+    await waitFor(() => {
+      expect(mockUploadFile).not.toHaveBeenCalled();
+      expect(mockTranscribeAudio).not.toHaveBeenCalled();
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(onText).not.toHaveBeenCalled();
+    });
+  });
+
+  it("ignores in-flight transcription results after unmount", async () => {
+    const onText = vi.fn();
+    const transcribeDeferred = createDeferred<{ text: string }>();
+    mockUploadFile.mockResolvedValue({ id: "att-1" });
+    mockTranscribeAudio.mockReturnValue(transcribeDeferred.promise);
+    mockDeleteAttachment.mockResolvedValue(undefined);
+
+    const view = renderWithI18n(<VoiceInputButton target="issue_title" onText={onText} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /voice input/i }));
+    await userEvent.click(screen.getByRole("button", { name: /stop recording/i }));
+
+    await waitFor(() => {
+      expect(mockUploadFile).toHaveBeenCalledTimes(1);
+      expect(mockTranscribeAudio).toHaveBeenCalledTimes(1);
+    });
+
+    view.unmount();
+    transcribeDeferred.resolve({ text: "" });
+
+    await waitFor(() => {
+      expect(onText).not.toHaveBeenCalled();
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(mockDeleteAttachment).toHaveBeenCalledWith("att-1");
+    });
+  });
+
+  it("deletes the temporary attachment when transcription fails", async () => {
+    const onText = vi.fn();
+    mockUploadFile.mockResolvedValue({ id: "att-2" });
+    mockTranscribeAudio.mockRejectedValue(new Error("transcription failed"));
+    mockDeleteAttachment.mockResolvedValue(undefined);
+
+    renderWithI18n(<VoiceInputButton target="issue_description" onText={onText} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /voice input/i }));
+    await userEvent.click(screen.getByRole("button", { name: /stop recording/i }));
+
+    await waitFor(() => {
+      expect(mockDeleteAttachment).toHaveBeenCalledWith("att-2");
+      expect(mockToastError).toHaveBeenCalledWith("transcription failed");
+      expect(onText).not.toHaveBeenCalled();
     });
   });
 });
